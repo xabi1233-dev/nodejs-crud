@@ -1,0 +1,29 @@
+# systemd unit for the CRUD app on EC2 (Ubuntu, 'ubuntu' user).
+# Differs from the local unit only in User and WorkingDirectory.
+# Installed to /etc/systemd/system/crud.service by provision.sh
+
+[Unit]
+Description=Node.js CRUD app (users table)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/crud
+ExecStart=/usr/bin/node /var/www/crud/server.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+
+# Basic hardening: the app needs no elevated access.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

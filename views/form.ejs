@@ -1,0 +1,41 @@
+<%- include('layout-head') %>
+
+<h2><%= mode === 'create' ? 'Create user' : 'Edit user #' + user.id %></h2>
+
+<% if (errors.length) { %>
+  <ul class="errors">
+    <% errors.forEach(function (e) { %><li><%= e %></li><% }); %>
+  </ul>
+<% } %>
+
+<form method="post" action="<%= mode === 'create' ? '/users' : '/users/' + user.id %>" class="card">
+  <label>
+    Name
+    <input type="text" name="name" value="<%= user.name || '' %>" required maxlength="100">
+  </label>
+
+  <label>
+    Email
+    <input type="email" name="email" value="<%= user.email || '' %>" required maxlength="190">
+  </label>
+
+  <label>
+    Phone
+    <input type="text" name="phone" value="<%= user.phone || '' %>" maxlength="30">
+  </label>
+
+  <label>
+    Status
+    <select name="status">
+      <option value="active"   <%= user.status === 'active'   ? 'selected' : '' %>>active</option>
+      <option value="inactive" <%= user.status === 'inactive' ? 'selected' : '' %>>inactive</option>
+    </select>
+  </label>
+
+  <div class="form-actions">
+    <button class="btn" type="submit"><%= mode === 'create' ? 'Create' : 'Save changes' %></button>
+    <a class="btn ghost" href="/">Cancel</a>
+  </div>
+</form>
+
+<%- include('layout-foot') %>

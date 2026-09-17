@@ -1,0 +1,47 @@
+<%- include('layout-head') %>
+
+<% if (flash) { %>
+  <p class="flash"><%= flash %></p>
+<% } %>
+
+<form class="search" method="get" action="/">
+  <input type="search" name="q" value="<%= q %>" placeholder="Search name or email…">
+  <button type="submit">Search</button>
+  <% if (q) { %><a class="clear" href="/">Clear</a><% } %>
+</form>
+
+<% if (users.length === 0) { %>
+  <p class="empty">No users found.</p>
+<% } else { %>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>ID</th><th>Name</th><th>Email</th><th>Phone</th>
+      <th>Status</th><th>Created</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  <% users.forEach(function (u) { %>
+    <tr>
+      <td><%= u.id %></td>
+      <td><%= u.name %></td>
+      <td><%= u.email %></td>
+      <td><%= u.phone || '—' %></td>
+      <td><span class="badge <%= u.status %>"><%= u.status %></span></td>
+      <td><%= new Date(u.created_at).toLocaleString() %></td>
+      <td class="actions">
+        <a class="btn small" href="/users/<%= u.id %>/edit">Edit</a>
+        <form method="post" action="/users/<%= u.id %>/delete"
+              onsubmit="return confirm('Delete <%= u.name.replace(/'/g, "\\'") %>?')">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+  <% }); %>
+  </tbody>
+</table>
+</div>
+<% } %>
+
+<%- include('layout-foot') %>

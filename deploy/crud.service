@@ -1,0 +1,25 @@
+# Optional: keeps the Node app running in the background and on reboot.
+#
+# Install:
+#   sudo cp /var/www/your_domain/crud/deploy/crud.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now crud
+#   systemctl status crud
+
+[Unit]
+Description=Node.js CRUD app (users table)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=zohaib
+WorkingDirectory=/var/www/your_domain/crud
+ExecStart=/home/zohaib/.nvm/versions/node/v20.20.2/bin/node /var/www/your_domain/crud/server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
