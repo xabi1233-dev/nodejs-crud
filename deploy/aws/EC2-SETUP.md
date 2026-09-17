@@ -320,6 +320,95 @@ gh run list --limit 3
 
 ---
 
+# How the auto-deploy actually works
+
+Three files cooperate:
+
+| File | Lives on | Role |
+|---|---|---|
+| `.github/workflows/deploy.yml` | GitHub | The trigger and the instructions |
+| `deploy/aws/deploy.sh` | The EC2 server | The actual update work |
+| `~/.ssh/crud-deploy` | Laptop + GitHub secret | The key that lets GitHub in |
+
+## Step by step, on every push
+
+**1. GitHub notices.** The workflow declares:
+
+```yaml
+on:
+  push:
+    branches: [master]
+```
+
+A push to `master` matches, so GitHub fires the workflow.
+
+**2. GitHub rents a temporary computer.** `runs-on: ubuntu-latest` boots a fresh,
+empty VM — the *runner*. The deploy is not run by your laptop or by your server:
+it is a third machine that exists for ~15 seconds and is then destroyed. Your
+laptop can be switched off the whole time.
+
+**3. The runner is given a key.** It starts with no access to anything. The first
+step writes the private key out of GitHub's encrypted secret storage:
+
+```yaml
+printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+chmod 600 ~/.ssh/deploy_key
+```
+
+This is why `EC2_SSH_KEY` must be the **private** key — it is the runner proving
+its identity. The matching public key sits in `~/.ssh/authorized_keys` on the
+server (Part 8.2).
+
+**4. The runner SSHes in and issues one command:**
+
+```bash
+ssh -i ~/.ssh/deploy_key ubuntu@13.62.53.248 'bash /var/www/crud/deploy/aws/deploy.sh'
+```
+
+No files are copied. The runner simply tells the server to update itself.
+
+**5. The server pulls from GitHub.** `deploy.sh` does the real work:
+
+```
+git fetch origin master
+git reset --hard origin/master      ← files updated
+npm install                          ← only if package.json changed
+sudo systemctl restart crud          ← Node reloads the new code
+poll /health for 20s                 ← did it come back up?
+```
+
+The restart is required because Node loads code into memory once at startup.
+New files on disk change nothing until the process restarts. (PHP re-reads files
+per request, which is why Apache sites update instantly and this one does not.)
+
+**6. Verification.** The workflow curls the public URL. If `/health` never returns
+200, the run goes red and dumps the service logs into the run output.
+
+## The mental model
+
+```
+laptop ──push──► GitHub ──"go update yourself"──► EC2 ──pull──► GitHub
+```
+
+Code travels laptop → GitHub → server. The *instruction* travels GitHub → server.
+**The server pulls its own code**; GitHub never pushes files to it.
+
+Two consequences follow from that:
+
+- The server needs no GitHub credentials, because the repo is public and it only
+  ever reads.
+- `deploy.sh` must already exist on the server before the first automated run —
+  hence the one manual `git pull` in Part 8.4.
+
+## Why it fails safe
+
+A failed deploy does not take the site down. `git reset --hard` and the restart
+happen on a server that is already serving; if the new code won't boot, systemd
+keeps retrying while the health poll fails and marks the run red. You get a red X
+and an email, and the site continues serving whatever was last working.
+
+---
+
 # Daily workflow
 
 **[LAPTOP]** — this is all you do from now on:
