@@ -1,0 +1,44 @@
+name: Deploy to EC2
+
+# Runs on every push to master, and on demand from the Actions tab.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# If two pushes land close together, let the newer one win rather than
+# deploying them concurrently.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Run deploy script on server
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$USER@$HOST" \
+            'bash /var/www/crud/deploy/aws/deploy.sh'
+
+      - name: Verify the site responds
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$HOST/health")
+          echo "Public health check returned HTTP $code"
+          test "$code" = "200"
