@@ -157,6 +157,11 @@ app.use((err, req, res, next) => {
   res.status(500).render('500', { message: err.message });
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-  console.log(`CRUD app listening on http://127.0.0.1:${PORT}`);
+// Bind to loopback by default: on the VM, nginx/Apache is the only thing that
+// should reach us. In a container, loopback means "unreachable from outside the
+// container", so compose sets HOST=0.0.0.0.
+const HOST = process.env.HOST || '127.0.0.1';
+
+app.listen(PORT, HOST, () => {
+  console.log(`CRUD app listening on http://${HOST}:${PORT}`);
 });

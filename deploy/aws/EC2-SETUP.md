@@ -28,7 +28,8 @@ Quick rules of thumb:
 
 | Thing | Value |
 |---|---|
-| Public IP | `13.62.53.248` |
+| Public IP | `13.62.53.248` (changes on stop/start) |
+| Domain | DuckDNS subdomain, kept current by cron (Part 9) |
 | Region | `eu-north-1` (Stockholm) |
 | OS | Ubuntu 26.04 LTS ("resolute") |
 | Instance | t3.micro, ~900 MB RAM |
@@ -60,6 +61,7 @@ Browser work, no commands.
    |---|---|---|
    | SSH | 22 | **My IP** |
    | HTTP | 80 | Anywhere `0.0.0.0/0` |
+   | HTTPS | 443 | Anywhere `0.0.0.0/0` — needed for Part 10 |
 
 4. **Launch**, wait for *Running* + 2/2 status checks, copy the **Public IPv4**.
 
@@ -409,6 +411,166 @@ and an email, and the site continues serving whatever was last working.
 
 ---
 
+# Part 9 — A domain with DuckDNS
+
+An EC2 public IP is not permanent: it is released whenever the instance is
+stopped, and a new one is assigned on the next start. DuckDNS gives a free
+hostname, and a cron job keeps it pointed at whatever the current IP is.
+
+> An **Elastic IP** solves the same problem by making the address permanent, and
+> is free while attached to a *running* instance. It costs ~$3.60/month while
+> attached to a stopped one — so for an instance that gets stopped to conserve
+> credits, DuckDNS plus cron is cheaper.
+
+## 9.1 Register
+
+**[BROWSER]** at https://www.duckdns.org — sign in and note:
+
+- the **subdomain** label only (`myname`, not `myname.duckdns.org`)
+- the **token** (UUID shown at the top)
+
+## 9.2 Store the credentials on the server
+
+**[SERVER]**
+
+```bash
+sudo tee /etc/duckdns.conf >/dev/null <<'CONF'
+DUCKDNS_DOMAIN=your-subdomain
+DUCKDNS_TOKEN=your-token-here
+CONF
+
+sudo chmod 600 /etc/duckdns.conf
+sudo chown root:root /etc/duckdns.conf
+```
+
+The token can repoint the domain anywhere, so it stays root-only and **never**
+goes in the repo.
+
+## 9.3 Test the updater
+
+**[SERVER]**
+
+```bash
+sudo /var/www/crud/deploy/aws/duckdns-update.sh
+cat /var/log/duckdns.log
+```
+
+Expect `OK  IP changed: none -> 13.62.53.248`. A `FAILED ... replied: 'KO'`
+means a wrong token or subdomain.
+
+## 9.4 Schedule it
+
+**[SERVER]**
+
+```bash
+sudo cp /var/www/crud/deploy/aws/duckdns.cron /etc/cron.d/duckdns
+sudo chmod 644 /etc/cron.d/duckdns
+sudo chown root:root /etc/cron.d/duckdns
+systemctl status cron --no-pager | head -3
+```
+
+## 9.5 Verify
+
+**[LAPTOP]**
+
+```bash
+dig +short your-subdomain.duckdns.org
+curl -s -o /dev/null -w "%{http_code}\n" http://your-subdomain.duckdns.org/
+```
+
+### How it behaves
+
+`duckdns-update.sh` runs every 5 minutes but only calls DuckDNS when the IP has
+actually changed, plus one keepalive every 12 hours (DuckDNS expires records
+after ~30 days of silence). So it is 288 cheap local checks a day, not 288 API
+calls, and the log stays quiet unless something real happens.
+
+It reads the IP from EC2 instance metadata (IMDSv2), falling back to
+api.ipify.org if metadata is unavailable.
+
+**In practice it will almost never fire.** An EC2 IP does not drift on its own —
+it only changes on stop/start. The cron exists so that when you do stop and
+start, the domain repairs itself within 5 minutes instead of silently breaking.
+
+---
+
+# Part 10 — HTTPS with Let's Encrypt
+
+Requires Part 9 (a real hostname) and port 443 open in the security group.
+
+## 10.1 Open port 443
+
+**[BROWSER]** — EC2 → Instances → `crud-app` → **Security** tab → the security
+group → **Edit inbound rules** → Add: **HTTPS / 443 / Anywhere**.
+
+Skipping this yields a valid certificate that nobody can reach.
+
+## 10.2 Name the vhost
+
+**[SERVER]**
+
+```bash
+export DOMAIN=your-subdomain.duckdns.org
+
+sudo sed -i "s/server_name _;/server_name $DOMAIN;/" /etc/nginx/sites-available/crud
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Certbot's nginx plugin locates the right server block **by name**, so the
+catch-all `server_name _;` has to become the real hostname first.
+
+## 10.3 Install certbot and issue the certificate
+
+**[SERVER]**
+
+```bash
+sudo apt update
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d $DOMAIN
+```
+
+Answer: a real email (expiry warnings), agree to the terms, and choose
+**2 (Redirect)** to send all HTTP traffic to HTTPS.
+
+Certbot proves domain control by serving a challenge file over port 80, then
+rewrites the nginx config — adding a `listen 443 ssl` block, the certificate
+paths, and the redirect.
+
+## 10.4 Verify
+
+**[LAPTOP]**
+
+```bash
+curl -I https://your-subdomain.duckdns.org/   # expect 200
+curl -I http://your-subdomain.duckdns.org/    # expect 301 to https
+```
+
+A browser should show a padlock with no warnings.
+
+## 10.5 Confirm auto-renewal
+
+Certificates last 90 days; the timer renews at ~60.
+
+```bash
+systemctl list-timers | grep certbot
+sudo certbot renew --dry-run
+```
+
+The dry run must end with `all simulated renewals succeeded`. **Do not skip
+this** — it is the difference between silent renewal and the site breaking with
+an expired certificate in three months.
+
+> **Certbot now owns the live nginx config.** `/etc/nginx/sites-available/crud`
+> no longer matches `deploy/aws/nginx-crud.conf` in the repo. That is fine —
+> `deploy.sh` never touches nginx — but never re-copy the repo version over it,
+> or the SSL setup is wiped.
+>
+> **Let's Encrypt rate-limits** to 5 failures per hour per hostname. If issuance
+> fails, read the error instead of retrying blindly: the usual causes are port
+> 443 still closed, DNS not yet resolving, or a typo in `$DOMAIN`.
+
+---
+
 # Daily workflow
 
 **[LAPTOP]** — this is all you do from now on:
@@ -469,6 +631,12 @@ mysql -u crud_user -p crud_db -e "SELECT * FROM users;"
 | SSH hangs | Your IP changed → update the SG's SSH source |
 | Actions run fails | `gh run view --log-failed` |
 | 500 errors | DB problem → `journalctl -u crud -n 50` |
+| Domain stopped resolving | IP changed and cron didn't fire → run `sudo /var/www/crud/deploy/aws/duckdns-update.sh` and read `/var/log/duckdns.log` |
+| DuckDNS replies `KO` | Wrong token or subdomain in `/etc/duckdns.conf` (use the label only, not the full hostname) |
+| HTTPS times out but HTTP works | Port 443 missing from the security group |
+| certbot: "could not find vhost" | `server_name` is still `_` → set it to the real hostname (Part 10.2) |
+| certbot challenge fails | DNS not resolving yet, or port 80 blocked. Mind the 5-failures-per-hour limit |
+| Certificate expired | Renewal timer broken → `systemctl list-timers \| grep certbot` and `sudo certbot renew --dry-run` |
 
 # Cost
 
@@ -476,16 +644,31 @@ mysql -u crud_user -p crud_db -e "SELECT * FROM users;"
 roughly 11–12 months of continuous running.
 
 - Set a budget alert: **Billing → Budgets → Create budget**
-- **Stopped** instance: storage only (~$0.65/mo), but the public IP is released —
-  you'd have to update the `EC2_HOST` secret
+- **Stopped** instance: storage only (~$0.65/mo), but the public IP is released.
+  DuckDNS repairs the hostname within 5 minutes; the `EC2_HOST` GitHub secret
+  still has to be updated by hand, since Actions connects by IP
 - **Terminate** when finished; stopped instances still bill for their volume
 
 # Not done — needed before this is production
 
-Deliberately minimal: plain HTTP, no auth on the CRUD pages, anyone with the IP
+Still deliberately minimal: no auth on the CRUD pages, so anyone with the URL
 can add or delete users, and the data lives in exactly one place.
 
-1. Domain + HTTPS (certbot — free, ~10 minutes, biggest single win)
-2. Authentication
-3. CSRF protection on mutating routes
-4. Automated MySQL backups
+1. **Authentication** — the biggest gap now that the site is publicly reachable
+2. **CSRF protection** on the mutating routes
+3. **Automated MySQL backups** — `mysqldump` on a cron, ideally off-instance
+4. Rate limiting, and fail2ban for SSH
+
+Done: HTTPS (Part 10), a stable hostname (Part 9), auto-deploy (Part 8).
+
+## Suggestion: point EC2_HOST at the domain
+
+Once DuckDNS is stable, setting the GitHub secret to the hostname rather than
+the IP means a stop/start no longer breaks deploys:
+
+```bash
+gh secret set EC2_HOST --body "your-subdomain.duckdns.org"
+```
+
+The workflow's `ssh-keyscan` and `ssh` both accept a hostname, and the final
+public health check would then follow the domain too.
