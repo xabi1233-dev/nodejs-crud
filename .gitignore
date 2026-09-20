@@ -1,3 +1,9 @@
 node_modules/
-.env
 npm-debug.log*
+
+# Secrets. Explicit names rather than .env* so .env.example stays tracked.
+.env
+.env.docker
+.env.local
+*.pem
+*.key
