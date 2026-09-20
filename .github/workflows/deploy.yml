@@ -39,6 +39,9 @@ jobs:
         env:
           HOST: ${{ secrets.EC2_HOST }}
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$HOST/health")
+          # -L follows the HTTP->HTTPS redirect that certbot installed, so this
+          # works whether or not TLS is configured. %{http_code} reports the
+          # status of the FINAL response after redirects.
+          code=$(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 "http://$HOST/health")
           echo "Public health check returned HTTP $code"
           test "$code" = "200"
