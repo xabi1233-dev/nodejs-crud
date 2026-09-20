@@ -1,0 +1,82 @@
+# Local container stack: Node app + MySQL.
+#
+#   docker compose up --build     start (first run builds the app image)
+#   docker compose up -d          start in the background
+#   docker compose logs -f app    follow the app's logs
+#   docker compose down           stop and remove the containers
+#   docker compose down -v        ...and DELETE the database volume
+#
+# Then open http://localhost:3000
+#
+# The passwords below are throwaway values for local containers only. They are
+# not used by the laptop's MySQL or by the EC2 deployment, both of which keep
+# their own credentials outside this file.
+
+services:
+  db:
+    # Built from mysql:8.4 with schema.sql copied in. A bind mount would be the
+    # obvious choice, but Docker Desktop only shares certain host paths with its
+    # VM — see docker/mysql.Dockerfile for the full explanation.
+    build:
+      context: .
+      dockerfile: docker/mysql.Dockerfile
+    image: crud-db:local
+    container_name: crud-db
+    restart: unless-stopped
+
+    environment:
+      # Defaults are throwaway values for local containers. On the server,
+      # real values come from .env.docker via `--env-file` (see EC2-DOCKER.md).
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootdevpass}
+      MYSQL_DATABASE: crud_db
+      MYSQL_USER: crud_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-cruddevpass}
+
+    volumes:
+      # Named volume: the data survives `docker compose down` and restarts.
+      # schema.sql is baked into the image, not mounted here.
+      - db_data:/var/lib/mysql
+
+    # Not published to the host by default — only the app container reaches it.
+    # Uncomment to connect a GUI client from the laptop.
+    # ports:
+    #   - "3307:3306"
+
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  app:
+    build: .
+    container_name: crud-app
+    restart: unless-stopped
+
+    environment:
+      # 'db' is the service name above. Compose runs a DNS server on the shared
+      # network, so the hostname resolves to that container's IP.
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: crud_user
+      DB_PASSWORD: ${MYSQL_PASSWORD:-cruddevpass}
+      DB_NAME: crud_db
+      PORT: 3000
+      # Loopback would make the app unreachable from outside the container.
+      HOST: 0.0.0.0
+
+    ports:
+      # Laptop: 0.0.0.0, so http://localhost:3000 works.
+      # EC2: BIND_ADDR=127.0.0.1 in .env.docker, so the container is reachable
+      # only by nginx on the host — never directly from the internet.
+      - "${BIND_ADDR:-0.0.0.0}:3000:3000"
+
+    depends_on:
+      db:
+        # Wait for MySQL to actually accept connections, not merely to start.
+        # Without this the app races the database and crashes on first boot.
+        condition: service_healthy
+
+volumes:
+  db_data:

@@ -33,7 +33,7 @@ jobs:
           USER: ${{ secrets.EC2_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$USER@$HOST" \
-            'bash /var/www/crud/deploy/aws/deploy.sh'
+            'bash /var/www/crud/deploy/aws/deploy-docker.sh'
 
       - name: Verify the site responds
         env:

@@ -1,0 +1,26 @@
+# Keep the build context small and keep secrets out of the image.
+
+# Rebuilt inside the image for the container's architecture.
+node_modules/
+
+# Secrets — the container gets its config from the environment instead.
+.env
+.env.docker
+.env.local
+*.pem
+*.key
+
+.git/
+.github/
+.gitignore
+
+# Server deployment tooling, irrelevant inside a container.
+deploy/
+
+*.md
+npm-debug.log*
+.vscode/
+.idea/
+Dockerfile
+.dockerignore
+docker-compose.yml
