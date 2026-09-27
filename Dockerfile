@@ -30,8 +30,15 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000
 
+# JSON (exec) notation, which is what Docker builds from the shell form anyway —
+# writing it out explicitly satisfies hadolint DL3025.
+#
+# The `sh -c` wrapper is required, not incidental: `|| exit 1` needs a shell.
+# It is doing real work. Docker reads 0 as healthy and 1 as unhealthy, and
+# reserves 2; wget exits with codes 1-8 depending on how it failed, so without
+# the normalisation a DNS failure could report a status Docker does not define.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
+  CMD ["/bin/sh", "-c", "wget -qO- http://127.0.0.1:3000/health || exit 1"]
 
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "server.js"]

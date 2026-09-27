@@ -1,0 +1,31 @@
+# hadolint configuration.
+#
+# Rules listed here are DELIBERATELY accepted, not silenced for convenience.
+# Each one carries the reasoning, so the next person can disagree on the merits.
+
+ignored:
+  # DL3018 — "Pin versions in apk add. Instead of `apk add <package>` use
+  # `apk add <package>=<version>`."
+  #
+  # Triggered by `apk add --no-cache tini` in Dockerfile.
+  #
+  # Accepted, for two reasons:
+  #
+  # 1. It would be reproducibility theatre. The base image is `node:22-alpine`,
+  #    a floating tag that moves with every Node 22.x patch and every Alpine
+  #    rebuild. Pinning tini to the patch revision while the entire operating
+  #    system underneath it drifts does not make the build reproducible — it
+  #    just makes one line look like it is.
+  #
+  # 2. Alpine's exact pins rot. `tini=0.19.0-r3` stops resolving the moment
+  #    Alpine bumps the `-rN` package revision, which happens independently of
+  #    anything in this repository, and the build breaks with no change from us.
+  #
+  # The structural fix, if this ever matters, is to stop installing tini at all:
+  # Docker Compose can inject an init process with `init: true` on the service,
+  # which would remove both this line and the ENTRYPOINT. That only protects
+  # containers started through compose, so it is not free either.
+  #
+  # Revisit if the base image is ever pinned by digest — at that point pinning
+  # tini would actually buy something.
+  - DL3018
