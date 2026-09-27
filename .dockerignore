@@ -24,3 +24,6 @@ npm-debug.log*
 Dockerfile
 .dockerignore
 docker-compose.yml
+
+# Lint config — dev tooling, not needed at runtime.
+eslint.config.js

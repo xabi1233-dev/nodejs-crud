@@ -152,7 +152,10 @@ app.get('/health', wrap(async (req, res) => {
 
 app.use((req, res) => res.status(404).render('404'));
 
-app.use((err, req, res, next) => {
+// Four parameters, not three: Express detects error-handling middleware by the
+// function's arity, so `_next` must stay in the signature even though nothing
+// here calls it. The underscore tells the linter the omission is deliberate.
+app.use((err, req, res, _next) => {
   console.error(err);
   res.status(500).render('500', { message: err.message });
 });
