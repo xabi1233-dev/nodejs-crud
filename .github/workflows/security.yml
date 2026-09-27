@@ -1,0 +1,105 @@
+name: Security Checks
+
+# Rungs 2, 6 and the lint gate from deploy/SECURITY-TESTING.md.
+# All three are free, deterministic and finish in about a minute, so unlike the
+# Strix scan they are safe to run on every push and every pull request.
+#
+# This workflow does NOT touch deploy.yml. It runs alongside it.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # --- Rung 2: secrets in git history -------------------------------------
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks walks the commit history, not the working tree. The
+          # default shallow checkout would hide every leak older than the
+          # last commit — which is precisely the kind this repo has had.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan history
+        run: |
+          # `git` is the history-scanning subcommand. (`detect` was removed in
+          # gitleaks v8.30 — it does not exist any more.)
+          #
+          # --redact is not optional here: this repository is PUBLIC, and build
+          # logs are public with it. Without it a scan that finds a secret
+          # republishes that secret to anyone reading the log.
+          gitleaks git . \
+            --redact \
+            --verbose \
+            --report-format sarif \
+            --report-path gitleaks.sarif
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks.sarif
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # --- Rung 6: Dockerfile linting -----------------------------------------
+  dockerfiles:
+    name: Dockerfile lint (hadolint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: Dockerfile
+          # Fail on `error` only. `warning` and below are reported in the log
+          # but do not break the build, so the first run gives you a baseline
+          # to triage rather than an immediate red pipeline.
+          failure-threshold: error
+
+      - name: Lint docker/mysql.Dockerfile
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: docker/mysql.Dockerfile
+          failure-threshold: error
+
+  # --- JavaScript linting --------------------------------------------------
+  lint:
+    name: JavaScript lint (eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `npm ci` installs devDependencies too, which is what we want here —
+      # eslint lives in devDependencies. The production image still builds with
+      # `npm ci --omit=dev`, so none of this reaches the shipped container.
+      - run: npm ci
+
+      - run: npm run lint
