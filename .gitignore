@@ -7,3 +7,25 @@ npm-debug.log*
 .env.local
 *.pem
 *.key
+
+# Terraform.
+# State holds EVERY attribute of EVERY managed resource in plaintext — it is a
+# secrets file whether or not you put secrets in it.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Real variable values. The .example stays tracked.
+*.tfvars
+!*.tfvars.example
+
+# Scratch output of `terraform plan -generate-config-out`. It is a draft to be
+# cleaned up into main.tf and deleted, never committed as-is.
+generated.tf
+
+# NOT ignored, deliberately: .terraform.lock.hcl
+# It pins exact provider versions the way package-lock.json pins npm packages.
+# It belongs in the repo. Ignoring it is a common mistake.

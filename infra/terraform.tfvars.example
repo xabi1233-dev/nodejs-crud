@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in your real values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# terraform.tfvars is gitignored. This .example file is tracked, so keep
+# placeholders here and never real IDs.
+#
+# ---------------------------------------------------------------------------
+# Find each value with the AWS CLI (see TERRAFORM.md Part 3):
+#
+#   aws ec2 describe-instances \
+#     --filters "Name=instance-state-name,Values=running" \
+#     --query 'Reservations[].Instances[].{ID:InstanceId,AMI:ImageId,Type:InstanceType,SG:SecurityGroups[].GroupId}' \
+#     --output table
+#
+#   aws configure get region        # the region your CLI is pointed at
+# ---------------------------------------------------------------------------
+
+# The region the instance actually runs in. Check it — a wrong region does not
+# error, it just looks at an empty one and proposes building everything new.
+region = "eu-north-1"
+
+# The running EC2 instance to adopt.
+instance_id = "i-0000000000000000"
+
+# Its security group — the one with your HTTP/HTTPS/SSH rules, not "default".
+security_group_id = "sg-0000000000000000"
+
+# Optional: Name tag applied once Terraform manages tags.
+# instance_name = "crud-app"

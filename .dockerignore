@@ -17,6 +17,13 @@ node_modules/
 # Server deployment tooling, irrelevant inside a container.
 deploy/
 
+# Terraform config. Runs from the laptop against the AWS API — it has no
+# business inside the application image, and *.tfstate must never reach one.
+infra/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
 *.md
 npm-debug.log*
 .vscode/
