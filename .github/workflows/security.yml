@@ -1,8 +1,10 @@
 name: Security Checks
 
-# Rungs 2, 6 and the lint gate from deploy/SECURITY-TESTING.md.
-# All three are free, deterministic and finish in about a minute, so unlike the
-# Strix scan they are safe to run on every push and every pull request.
+# Rungs 2, 5, 6 and the lint gate from deploy/SECURITY-TESTING.md.
+# All four are free and deterministic, so unlike the Strix scan they are safe
+# to run on every push and every pull request. The three lint/secret jobs
+# finish in seconds; the trivy job builds both images first, so expect a few
+# minutes for that one. All four run in parallel.
 #
 # This workflow does NOT touch deploy.yml. It runs alongside it.
 
@@ -11,6 +13,11 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  # Image CVEs appear without anyone touching this repository: a vulnerability
+  # disclosed against node:22-alpine or mysql:8.4 makes yesterday's build
+  # unsafe today. Code-triggered runs would never notice. This one does.
+  schedule:
+    - cron: '0 4 * * 1'          # Mondays 04:00 UTC
 
 concurrency:
   group: security-${{ github.ref }}
@@ -86,6 +93,56 @@ jobs:
           dockerfile: docker/mysql.Dockerfile
           config: .hadolint.yaml
           failure-threshold: error
+
+  # --- Rung 5: CVEs in the images we actually ship -------------------------
+  images:
+    name: Image CVE scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # Both images are built here rather than pulled, because both are ours:
+      # the app image, and the MySQL image with schema.sql baked in. Scanning
+      # the bare mysql:8.4 instead would miss anything our own layer adds.
+      #
+      # Caveat worth knowing: this scans what CI builds *now*. Because the base
+      # tags float, it is not byte-identical to the image currently running on
+      # EC2 — it is the image the next deploy would produce. That is the useful
+      # question ("is my next deploy clean?"), but it is not the same question
+      # as "is the running container clean?".
+      - name: Build app image
+        run: docker build -t crud-app:ci .
+
+      - name: Build database image
+        run: docker build -f docker/mysql.Dockerfile -t crud-db:ci .
+
+      - name: Scan app image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: crud-app:ci
+          # Finds CVEs in BOTH the Alpine OS packages and the npm packages
+          # installed inside the image — one scan covers both layers.
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          # Hide CVEs with no released fix. They are real, but there is no
+          # action to take beyond rebuilding later, and they drown the ones
+          # you can act on today. Set to false to see the full picture.
+          ignore-unfixed: true
+          # Report, do not fail — same baseline-first approach as hadolint.
+          # Switch to '1' once the findings are triaged.
+          exit-code: '0'
+          format: table
+
+      - name: Scan database image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: crud-db:ci
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+          format: table
 
   # --- JavaScript linting --------------------------------------------------
   lint:

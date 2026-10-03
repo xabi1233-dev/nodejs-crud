@@ -240,26 +240,39 @@ instead of your real records.
 
 ---
 
-## Rungs 5–8, once the first four are in
+## Rungs 5–8
 
-**Trivy** — you ship containers now, so base-image CVEs are the most likely real
-finding on this whole list:
+**Trivy — DONE**, as the `images` job in `.github/workflows/security.yml`.
+You ship containers, so base-image CVEs are the most likely real finding on
+this whole list. Decisions baked into that job:
 
-```yaml
-      - name: Build the app image
-        run: docker build -t crud-app:ci .
+| Setting | Choice | Why |
+|---|---|---|
+| Targets | **both** images, built not pulled | The MySQL image is ours too — it has `schema.sql` baked in. Scanning bare `mysql:8.4` would miss our own layer |
+| `vuln-type` | `os,library` | One scan covers Alpine OS packages *and* the npm packages inside the image |
+| `severity` | `CRITICAL,HIGH` | Medium and below on a base image is mostly unactionable noise |
+| `ignore-unfixed` | `true` | CVEs with no released fix are real but have no action beyond "rebuild later". Set `false` to see the full picture |
+| `exit-code` | `'0'` | Report-only until the baseline is triaged — same approach as hadolint |
 
-      - uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: crud-app:ci
-          severity: CRITICAL,HIGH
-          exit-code: '0'          # report only until you've seen a baseline
-          format: table
+A weekly `schedule:` trigger was added at the same time, and it matters more
+for Trivy than for anything else here: a CVE disclosed against `node:22-alpine`
+or `mysql:8.4` makes yesterday's build unsafe today, with no commit to trigger
+on. Code-triggered runs would never notice.
+
+**What this scan does and does not tell you.** It scans what CI builds *now*.
+Because the base tags float, that is not byte-identical to the image currently
+running on EC2 — it is the image your **next deploy** would produce. Useful
+question, but not the same as "is the running container clean?". For that you
+would scan on the server:
+
+```bash
+# [SERVER] — scans what is actually running
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy:latest image --severity CRITICAL,HIGH crud-app:latest
 ```
 
-**Hadolint** — `hadolint/hadolint-action@v3.5.0` against `Dockerfile` and
-`docker/mysql.Dockerfile`. Seconds, and it knows the pinning and `USER` rules
-you already followed.
+**Hadolint — DONE**, as the `dockerfiles` job. See `.hadolint.yaml` for the one
+rule deliberately accepted and the reasoning behind it.
 
 **ZAP baseline** — the free DAST, and the honest alternative to Strix for most
 of what Strix would find on an app this size. It needs the same ephemeral target
