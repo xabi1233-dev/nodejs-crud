@@ -100,6 +100,59 @@ resource "aws_instance" "crud" {
   user_data                   = null
   user_data_replace_on_change = null
 
+  # --- REBUILD-FROM-SCRATCH MODE (currently disabled) -----------------------
+  #
+  # Replace the two `null` lines above with the block below to make this
+  # instance rebuild itself from code on every boot.
+  #
+  # READ THIS BEFORE UNCOMMENTING.
+  #
+  # This instance was imported, and it currently has user_data = null. Setting
+  # user_data to a script CHANGES AN ATTRIBUTE THAT FORCES REPLACEMENT. The
+  # plan will read:
+  #
+  #     # aws_instance.crud must be replaced
+  #     -/+ destroy and then create replacement
+  #
+  # Because root_block_device.delete_on_termination = true, replacement
+  # DESTROYS THE DISK. You lose the MySQL volume and every user row in it,
+  # .env.docker, the Let's Encrypt certificate and /etc/duckdns.conf.
+  #
+  # The lifecycle.prevent_destroy block at the bottom of this resource will
+  # refuse the plan until you remove it. That is deliberate.
+  #
+  # To switch over, in this order:
+  #   1. Back up the data, from the SERVER:
+  #        cd /var/www/crud
+  #        docker compose --env-file .env.docker exec -T db \
+  #          mysqldump -u root -p"$(grep MYSQL_ROOT_PASSWORD .env.docker | cut -d= -f2)" \
+  #          crud_db > ~/final_backup.sql
+  #      then scp it to your laptop.
+  #   2. Confirm the AMI snapshot is `available`.
+  #   3. Fill duckdns_token, certbot_email and deploy_public_key in
+  #      terraform.tfvars. Leave certbot_staging = true.
+  #   4. Delete the lifecycle.prevent_destroy block below — as its own commit.
+  #   5. Swap the two null lines above for this block.
+  #   6. terraform plan, and read every line of it.
+  #   7. terraform apply, then wait ~4 minutes and watch
+  #        ssh ... 'sudo tail -f /var/log/cloud-init-output.log'
+  #   8. Restore the dump if you want the old rows back.
+  #
+  # user_data_replace_on_change = true means every later EDIT to user_data.sh
+  # also replaces the instance. That is the intended behaviour — a first-boot
+  # script that only runs on first boot is useless otherwise — but it means
+  # editing that file is never a cheap change.
+  #
+  # user_data = templatefile("${path.module}/user_data.sh", {
+  #   repo_url          = var.repo_url
+  #   duckdns_domain    = var.duckdns_domain
+  #   duckdns_token     = var.duckdns_token
+  #   certbot_email     = var.certbot_email
+  #   certbot_staging   = tostring(var.certbot_staging)
+  #   deploy_public_key = var.deploy_public_key
+  # })
+  # user_data_replace_on_change = true
+
   disable_api_stop                     = false
   disable_api_termination              = false
   ebs_optimized                        = true
