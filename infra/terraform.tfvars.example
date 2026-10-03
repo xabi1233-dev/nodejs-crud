@@ -27,4 +27,35 @@ instance_id = "i-0000000000000000"
 security_group_id = "sg-0000000000000000"
 
 # Optional: Name tag applied once Terraform manages tags.
-# instance_name = "crud-app"
+# instance_name = "NodejsCRUD"
+
+# --- Rebuild-from-scratch inputs --------------------------------------------
+# Consumed by user_data.sh. Changing ANY of these changes user_data, which
+# REPLACES the instance — destroying the disk and the database with it.
+
+# DuckDNS subdomain WITHOUT the .duckdns.org suffix.
+duckdns_domain = "isdi-crud"
+
+# DuckDNS API token, from https://www.duckdns.org (same token for all your
+# subdomains). Empty = skip DNS and TLS entirely.
+#
+# This value is stored in plaintext in terraform.tfstate AND is readable from
+# the instance metadata service by anything running on the box. Acceptable for
+# a DuckDNS token, which is free and revocable in one click. Do not put a
+# database or cloud credential here.
+duckdns_token = ""
+
+# Where Let's Encrypt sends expiry warnings.
+certbot_email = "you@example.com"
+
+# false = a real, browser-trusted certificate.
+# true  = Let's Encrypt staging: untrusted (browser warning), but unlimited.
+#
+# Production wants false. Be aware: only 5 real certificates per domain per
+# week. If certbot fails, user_data continues and the site stays on HTTP —
+# you can then run certbot by hand over SSH rather than rebuilding.
+certbot_staging = false
+
+# Public half of the GitHub Actions deploy key, so auto-deploy keeps working
+# after a rebuild. Get it with:  cat ~/.ssh/crud-deploy.pub
+deploy_public_key = "ssh-ed25519 AAAA... github-actions-deploy"
