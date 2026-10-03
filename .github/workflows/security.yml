@@ -144,6 +144,28 @@ jobs:
           exit-code: '0'
           format: table
 
+  # --- Infrastructure-as-code misconfiguration scanning --------------------
+  terraform:
+    name: Terraform scan (trivy config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # NOT tfsec. Aqua folded tfsec into Trivy — its final release was
+      # v1.28.14 in May 2025 and it receives no new rules. `trivy config` runs
+      # the same 1,000+ checks, and we already run Trivy for image CVEs, so
+      # this adds a scanner we are not otherwise maintaining.
+      - name: Scan Terraform config
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: infra/
+          severity: CRITICAL,HIGH,MEDIUM
+          # Report-only until the findings are triaged — same approach as the
+          # image scan and hadolint.
+          exit-code: '0'
+          format: table
+
   # --- JavaScript linting --------------------------------------------------
   lint:
     name: JavaScript lint (eslint)
