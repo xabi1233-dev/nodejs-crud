@@ -1,0 +1,10 @@
+# Everything this project puts in the cluster lives here, so the whole stack
+# can be removed with a single `kubectl delete namespace crud`.
+#
+# Numeric filename prefixes exist so `kubectl apply -f k8s/` applies files in
+# dependency order: this namespace first, then the Secret and ConfigMap, then
+# the workloads that mount them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: crud
