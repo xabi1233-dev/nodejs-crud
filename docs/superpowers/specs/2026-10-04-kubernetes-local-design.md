@@ -42,7 +42,7 @@ Measured on 2026-10-04, not assumed:
 | Ingress controllers | none | We install one. |
 | Host port 80 | held by Apache (`active`) | **Conflict.** See decision 5. |
 | `/etc/hosts` | `127.0.0.1 crud.local` → Apache vhost | Cannot reuse that hostname. |
-| Disk free | 41 GB (91 % used) | `mysql:8.4` + ingress-nginx ≈ 700 MB. Fits, but not flush. |
+| Disk free | 41 GB (91 % used) | `mysql:8.4` (~600 MB) + Traefik (~200 MB). Fits, but not flush. |
 | metrics-server | not installed | `kubectl top` will not work. Out of scope. |
 
 ---
@@ -53,7 +53,7 @@ Measured on 2026-10-04, not assumed:
 browser   http://crud.k8s.local:8080
    │
    ▼
-ingress-nginx                     Service type LoadBalancer, port 8080
+Traefik                           Service type LoadBalancer, port 8080
    │                              (NOT 80 — Apache holds it)
    │  Ingress rule: host crud.k8s.local  →  crud-app:3000
    ▼
@@ -221,22 +221,64 @@ Requires one line added to `/etc/hosts`:
 127.0.0.1 crud.k8s.local
 ```
 
-**Ingress controller installation.** Install ingress-nginx from its
-official static manifest for the `cloud` provider, then patch the
-controller Service's port from 80 to 8080. Docker Desktop fulfils
-`LoadBalancer` services by binding the service port on localhost, so
-this yields `http://crud.k8s.local:8080`.
+**Ingress controller: Traefik, not ingress-nginx.**
 
-The controller version must be pinned to an explicit release tag —
-never `main` — selected at implementation time from the ingress-nginx
-compatibility table for Kubernetes 1.36.
+*Amended 2026-10-04, after the original draft.* The first version of
+this section specified `ingress-nginx`. That project was formally
+**retired on 24 March 2026** by Kubernetes SIG Network and the Security
+Response Committee: no further releases, no bug fixes, no security
+patches. Its designated successor, InGate, never reached maturity and
+was also retired. The compatibility table this section originally
+pointed at no longer tracks Kubernetes 1.36.
 
-**Contingency, with its trigger.** If after patching, `ss -ltn` does
-not show 8080 bound, switch the controller Service to `type: NodePort`
-with `nodePort: 30080` and use `http://crud.k8s.local:30080`. Docker
+Traefik replaces it. Note what does **not** change: the workload still
+exposes itself through a standard `Ingress` resource exactly as
+section 3 draws it. Only the controller implementing that resource
+differs. Traefik is actively maintained, is the controller k3s ships by
+default, and reads `nginx.ingress.kubernetes.io` annotations natively.
+
+Rejected alternatives:
+
+- **Gateway API.** The official successor to Ingress and genuinely the
+  future, but it replaces `Ingress` with `GatewayClass` + `Gateway` +
+  `HTTPRoute` — different objects from the ones this spec teaches, and
+  a rewrite rather than an amendment. A reasonable follow-on spec.
+- **ingress-nginx regardless.** Still functions and is still the most
+  documented controller, and on a local-only cluster the missing
+  security patches carry no real risk. Rejected because the point of
+  this exercise is to learn something current.
+
+**Installation.** Traefik installs via Helm. This does not contradict
+the "no Helm" non-goal in section 1, which concerns packaging *this
+app* as a chart; here Helm installs a third-party controller.
+
+```
+helm repo add traefik https://traefik.github.io/charts
+helm repo update
+helm install traefik traefik/traefik \
+  --namespace traefik --create-namespace \
+  --set ports.web.exposedPort=8080 \
+  --set ports.websecure.expose.default=false
+```
+
+- `ports.web.exposedPort=8080` sets the **Service** port. Docker
+  Desktop fulfils `LoadBalancer` services by binding the service port on
+  localhost, which yields `http://crud.k8s.local:8080`. (The chart's
+  `ports.web.port` is the *container* port and is left alone.)
+- `ports.websecure.expose.default=false` drops the 443 listener. TLS is
+  out of scope locally (section 10), and an unused bound port is one
+  more thing to collide with.
+
+The Ingress in `k8s/40-ingress.yaml` must therefore set
+`ingressClassName: traefik`.
+
+**Contingency, with its trigger.** If `kubectl get svc -n traefik
+traefik` shows `EXTERNAL-IP` stuck at `<pending>`, or `ss -ltn` does not
+show 8080 bound, reinstall with `--set service.type=NodePort --set
+ports.web.nodePort=30080` and use `http://crud.k8s.local:30080`. Docker
 Desktop's node is localhost, so NodePorts are reachable directly. The
-default NodePort range is 30000-32767, which is why the fallback port
-is 30080 and not 8080.
+default NodePort range is 30000-32767, which is why the fallback port is
+30080 and not 8080.
 
 ### 4.6 Secrets are encoding, not encryption
 
@@ -273,7 +315,7 @@ one pod can starve the control plane and take the whole cluster down.
 |---|---|---|
 | `crud-db` | 512Mi / 250m | 1Gi / 1000m |
 | `crud-app` ×2 | 128Mi / 100m each | 256Mi / 500m each |
-| ingress-nginx | ~100Mi (its own default) | — |
+| Traefik | ~100Mi (chart default) | — |
 | control plane | ~800Mi (observed) | — |
 | **Total requests** | **≈1.6 Gi of 3.6 Gi** (512+128+128+100+800 = 1 668Mi) | headroom ≈2.0 Gi |
 
@@ -306,7 +348,7 @@ entrypoint skips both initialisation and the initdb.d scripts
 entirely. Existing rows persist. This is what verification test 2
 proves.
 
-**Request path:** browser → `crud.k8s.local:8080` → ingress-nginx →
+**Request path:** browser → `crud.k8s.local:8080` → Traefik →
 host-rule match → `crud-app` Service → one of two pods → `mysql2` pool
 → `crud-db-0.crud-db:3306`.
 
