@@ -287,8 +287,16 @@ password. This mirrors the existing `.env` discipline:
 
 | File | Tracked? | Contents |
 |---|---|---|
-| `k8s/secret.example.yaml` | yes | placeholders only |
+| `k8s/secret.yaml.example` | yes | placeholders only |
 | `k8s/secret.yaml` | **no** — gitignored | real generated passwords |
+
+The template's `.example` suffix is load-bearing, not cosmetic.
+`kubectl apply -f k8s/` applies every `.yaml` in the directory, and the
+template declares the *same* object name as the real Secret. As a
+`.yaml` it would overwrite the generated passwords with placeholders and
+break MySQL on the next apply — silently. `.example` puts it outside
+kubectl's extension filter, and matches the `.env.example` /
+`terraform.tfvars.example` convention already used in this repo.
 
 The real Secret is generated, never hand-edited:
 
@@ -375,7 +383,7 @@ New:
 ```
 k8s/
   00-namespace.yaml            namespace crud
-  10-secret.example.yaml       placeholders, tracked
+  secret.yaml.example          placeholders, tracked
   11-configmap-schema.yaml     generated from schema.sql
   20-mysql-statefulset.yaml    + volumeClaimTemplate 2Gi
   21-mysql-service.yaml        headless, clusterIP: None
