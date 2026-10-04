@@ -1,0 +1,26 @@
+# Headless: clusterIP None means no virtual IP and no load balancing. Instead,
+# DNS returns the pod's own address, which is what gives the StatefulSet member
+# its stable name:
+#
+#   crud-db-0.crud-db.crud.svc.cluster.local
+#
+# Inside this namespace, `crud-db-0.crud-db` is enough — that is exactly the
+# string the app's DB_HOST is set to in 30-app-deployment.yaml.
+#
+# A database is a thing you address directly, not something to round-robin
+# across, which is why this is headless rather than a normal ClusterIP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: crud-db
+  namespace: crud
+  labels:
+    app: crud-db
+spec:
+  clusterIP: None
+  selector:
+    app: crud-db
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: mysql

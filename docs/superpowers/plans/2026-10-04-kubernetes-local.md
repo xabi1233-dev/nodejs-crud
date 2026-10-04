@@ -649,21 +649,41 @@ kubectl get events -n crud --field-selector involvedObject.name=crud-db-0 \
 kubectl get pod crud-db-0 -n crud -o jsonpath='{.status.containerStatuses[0].restartCount}{"\n"}'
 ```
 
-Expected: restart count **`0`**, and no `Killing` / `Unhealthy` events
-for the liveness probe. Any restart during first boot means the probe
-budget is too tight and MySQL is being killed mid-initialisation.
+Expected: restart count **`0`** and **no `Killing` events**.
+
+Exactly one `Unhealthy` event reading `Readiness probe failed` is
+**correct** and should be there — it is the readiness probe reporting
+that MySQL had not finished initialising yet. What must not appear is a
+`Killing` event or a non-zero restart count: those mean the liveness
+probe fired and MySQL is being killed mid-initialisation.
 
 - [ ] **Step 8: Verify the app's future DB hostname resolves**
 
 `[LAPTOP]`
 ```bash
-kubectl run dns-probe -n crud --image=busybox:1.36 --restart=Never --rm -it -- \
-  nslookup crud-db-0.crud-db
+kubectl run dnscheck -n crud --image=mysql:8.4 --restart=Never --command -- sleep 60
+kubectl wait --for=condition=ready pod/dnscheck -n crud --timeout=90s
+kubectl exec -n crud dnscheck -- getent hosts crud-db-0.crud-db
+kubectl exec -n crud dnscheck -- getent hosts crud-db
+kubectl delete pod dnscheck -n crud --force --grace-period=0
 ```
 
-Expected: an answer resolving `crud-db-0.crud-db.crud.svc.cluster.local`
-to the pod IP. This is the exact string Task 4 sets as `DB_HOST`; if it
-does not resolve here, the app will not connect.
+Expected: both resolve, the first to
+`crud-db-0.crud-db.crud.svc.cluster.local` at the pod IP. This is the
+exact string Task 4 sets as `DB_HOST`; if it does not resolve here, the
+app will not connect.
+
+> **Do not use `busybox nslookup` for this.** busybox's `nslookup`
+> mishandles Kubernetes' `ndots`/search-path resolution and reports
+> `NXDOMAIN` for names that resolve perfectly — a false alarm that sends
+> you debugging working DNS. `getent hosts` from a glibc image uses the
+> pod's real resolver. The `mysql:8.4` image is already cached locally,
+> so this costs no download.
+
+If it genuinely does not resolve, check in this order: the pod is an
+endpoint of the Service (`kubectl get endpointslice -n crud -l
+kubernetes.io/service-name=crud-db`), the Service is headless
+(`clusterIP: None`), and the pod's `subdomain` equals the Service name.
 
 - [ ] **Step 9: Commit**
 

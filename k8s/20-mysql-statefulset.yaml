@@ -1,0 +1,115 @@
+# StatefulSet rather than Deployment, for two reasons:
+#
+#  1. A Deployment with a ReadWriteOnce PVC DEADLOCKS on rolling update: the
+#     new pod cannot mount the volume while the old pod still holds it, and the
+#     old pod is not removed until the new one is Ready. The rollout hangs
+#     forever. A StatefulSet terminates before it creates, so it cannot
+#     deadlock this way.
+#  2. Stable identity: this pod is always `crud-db-0`, so the app has a fixed
+#     hostname to point at rather than a new pod IP after every restart.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: crud-db
+  namespace: crud
+spec:
+  serviceName: crud-db        # MUST match the headless Service's name
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crud-db
+  template:
+    metadata:
+      labels:
+        app: crud-db
+    spec:
+      containers:
+        - name: mysql
+          # Stock image. The Compose stack builds a custom one (see
+          # docker/mysql.Dockerfile) only to work around Docker Desktop
+          # refusing to bind-mount /var/www into its VM. A ConfigMap has no
+          # such problem, so no custom image is needed here.
+          image: mysql:8.4
+          ports:
+            - name: mysql
+              containerPort: 3306
+          env:
+            # The entrypoint processes these BEFORE running the files in
+            # /docker-entrypoint-initdb.d, so the database and the
+            # crud_user@'%' account already exist by the time schema.sql runs.
+            - name: MYSQL_DATABASE
+              value: crud_db
+            - name: MYSQL_USER
+              value: crud_user
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crud-db-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crud-db-secret
+                  key: MYSQL_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: schema
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+          # failureThreshold 30 x periodSeconds 5 = 150s of grace.
+          #
+          # Measured first boot here: 21s from start to Ready, with the
+          # mysql:8.4 image already cached by the Compose stack. A cold pull
+          # on a slow link is the case this budget is really sized for — and
+          # a budget too tight restarts MySQL in the middle of initialising
+          # its data directory, forever. Being generous costs nothing: the
+          # probe stops as soon as it succeeds.
+          #
+          # Expect exactly one "Readiness probe failed" event on first boot.
+          # That is the probe working, not a fault. A "Killing" event or a
+          # non-zero restartCount is the real warning sign.
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - mysqladmin ping -h 127.0.0.1 -uroot -p"$MYSQL_ROOT_PASSWORD" --silent
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          # Deliberately shallow, and deliberately generous. A liveness probe
+          # that ran a query would kill MySQL during a long crash recovery —
+          # exactly the moment when killing it is worst.
+          livenessProbe:
+            tcpSocket:
+              port: mysql
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - name: schema
+          configMap:
+            name: crud-db-schema
+  # Not a plain PVC: volumeClaimTemplates gives each replica its own volume,
+  # and the volume SURVIVES the pod. storageClassName is omitted so the
+  # cluster default (hostpath) is used.
+  #
+  # WARNING: that StorageClass has reclaimPolicy Delete. Deleting this PVC
+  # destroys the data permanently. Deleting the POD does not — that is what
+  # acceptance test 2 proves.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
