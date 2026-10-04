@@ -15,6 +15,9 @@ spec:
       labels:
         app: crud-app
     spec:
+      # 30s is ample for `sleep 5` plus Node's exit. Without this the default
+      # is also 30s, but stating it makes the preStop budget below legible.
+      terminationGracePeriodSeconds: 30
       containers:
         - name: app
           image: crud-app:k8s
@@ -73,6 +76,26 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3
+          # Closes the terminating-pod race, which is why requests were dropped
+          # during a rollout before this existed.
+          #
+          # Deleting a pod does two things AT THE SAME TIME: it sends SIGTERM
+          # to the container, and it starts removing the pod from the
+          # EndpointSlice. The second one is asynchronous — it has to propagate
+          # to Traefik. In the gap, Traefik still routes to a pod that is
+          # already shutting down, and the caller gets 502 or a dropped
+          # connection.
+          #
+          # preStop runs BEFORE SIGTERM. Sleeping here keeps the pod serving
+          # for five more seconds while the endpoint removal lands, so by the
+          # time Node is asked to stop, nothing is being routed to it any more.
+          # This is why one deleted pod could still drop a request even with a
+          # second healthy replica standing by: replica count never fixes a
+          # race, only the ordering does.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
           resources:
             requests:
               memory: 128Mi

@@ -1358,23 +1358,47 @@ data, and the StatefulSet is giving nothing a Deployment with
 
 - [ ] **Step 6: Acceptance test 3 — replicas keep serving**
 
+Two scenarios, because they fail for different reasons.
+
+**A — one pod dies** (a crash, an eviction):
+
 `[LAPTOP]`
 ```bash
-kubectl delete pod -n crud -l app=crud-app --wait=false
-for i in $(seq 1 20); do
+VICTIM=$(kubectl get pods -n crud -l app=crud-app -o jsonpath='{.items[0].metadata.name}')
+kubectl delete pod "$VICTIM" -n crud --wait=false
+for i in $(seq 1 14); do
   curl -s -o /dev/null -w '%{http_code} ' --max-time 3 http://crud.k8s.local:8080/health
   sleep 1
 done; echo
-kubectl get pods -n crud -l app=crud-app
+kubectl wait --for=condition=available deployment/crud-app -n crud --timeout=120s
 ```
 
-Expected: **`200` throughout**, and two pods back to `1/1`.
+**B — rollout restart** (what a code deploy actually does):
 
-Kubernetes deletes the two pods one at a time and the Service routes
-only to Ready endpoints, so a surviving replica serves every request.
-A few `000` or `502` responses mean both pods went down together — the
-Service had no Ready endpoint, which is what the second replica exists
-to prevent.
+`[LAPTOP]`
+```bash
+kubectl rollout restart deployment/crud-app -n crud
+for i in $(seq 1 22); do
+  curl -s -o /dev/null -w '%{http_code} ' --max-time 3 http://crud.k8s.local:8080/health
+  sleep 1
+done; echo
+kubectl rollout status deployment/crud-app -n crud --timeout=120s
+```
+
+Expected: **`200` throughout, in both**.
+
+A `502` or `000` here is the **terminating-pod race**, not a replica-count
+problem. Deleting a pod sends SIGTERM *and* starts removing it from the
+EndpointSlice at the same time, and the removal has to propagate to
+Traefik. In that gap Traefik still routes to a pod that is shutting
+down. The `preStop` sleep in `30-app-deployment.yaml` is what closes it;
+remove that hook and scenario A drops a request even though a second
+healthy replica is standing by. A replica count never fixes a race —
+only the ordering does.
+
+> Do **not** test this with `kubectl delete pod -l app=crud-app`. That
+> deletes *every* pod at once, which no configuration can survive, and
+> it tells you nothing about rolling updates.
 
 - [ ] **Step 7: Confirm production files were not touched**
 

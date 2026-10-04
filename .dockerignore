@@ -34,3 +34,12 @@ docker-compose.yml
 
 # Lint config — dev tooling, not needed at runtime.
 eslint.config.js
+
+# Kubernetes manifests and specs — cluster and repo tooling, not runtime files.
+# k8s/secret.yaml in particular must never reach an image.
+#
+# Note the `*.md` rule above does NOT cover docs/: Docker ignore patterns do
+# not cross a `/`, so `*.md` matches only top-level files.
+k8s/
+docs/
+.superpowers/

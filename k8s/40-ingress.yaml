@@ -1,0 +1,33 @@
+# The public entry point, and the Kubernetes equivalent of the nginx server
+# block on the EC2 box.
+#
+# Host is crud.k8s.local, NOT crud.local: Apache already owns port 80 on this
+# laptop and /etc/hosts already points crud.local at it. A separate hostname on
+# a separate port means both deployments of this app run side by side.
+#
+# Traefik routes on the Host header, so requesting http://localhost:8080/
+# returns 404 even though the app is healthy — the request matches no rule.
+# That is correct behaviour, and the same class of confusion as a certbot
+# server_name 404 on the EC2 box.
+#
+# Controller is Traefik rather than ingress-nginx, which was retired on
+# 2026-03-24 (no releases, no bug fixes, no security patches). The Ingress
+# resource itself is unaffected by that swap.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: crud
+  namespace: crud
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: crud.k8s.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: crud-app
+                port:
+                  number: 3000
