@@ -29,3 +29,13 @@ generated.tf
 # NOT ignored, deliberately: .terraform.lock.hcl
 # It pins exact provider versions the way package-lock.json pins npm packages.
 # It belongs in the repo. Ignoring it is a common mistake.
+
+# Generated Kubernetes Secret: real passwords, base64-encoded.
+# base64 is ENCODING, NOT ENCRYPTION — anyone with this file has the password.
+# Regenerate it with the command in k8s/README.md.
+# The tracked template is k8s/secret.yaml.example, which keeps its .example
+# suffix so `kubectl apply -f k8s/` cannot apply it over the real Secret.
+k8s/secret.yaml
+
+# Plan-execution scratch (ledger, briefs, review packages). Not project code.
+.superpowers/
