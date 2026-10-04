@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crud-app
+  namespace: crud
+spec:
+  # Two, not one. A Service load-balancing to a single pod demonstrates
+  # nothing, and a rolling update with one replica leaves no pod serving.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: crud-app
+  template:
+    metadata:
+      labels:
+        app: crud-app
+    spec:
+      containers:
+        - name: app
+          image: crud-app:k8s
+          # Never: the image is already in the local Docker store, which Docker
+          # Desktop's Kubernetes shares. The default policy would try to pull
+          # crud-app:k8s from Docker Hub and fail with ErrImagePull.
+          #
+          # CONSEQUENCE: after any `docker build`, these pods keep running the
+          # OLD image until you run
+          #   kubectl rollout restart deployment/crud-app -n crud
+          # The tag must stay explicit for the same reason — `Never` plus
+          # `:latest` silently runs whatever :latest pointed at on pod start.
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            # The image already sets HOST and PORT, but stating them here makes
+            # the pod spec self-describing.
+            - name: HOST
+              value: "0.0.0.0"       # loopback would be unreachable from outside
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: crud-db-0.crud-db
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_NAME
+              value: crud_db
+            - name: DB_USER
+              value: crud_user
+            # The same Secret key MySQL reads as MYSQL_PASSWORD, surfaced under
+            # the name this app expects. One value, stored in one place.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crud-db-secret
+                  key: MYSQL_PASSWORD
+          # Deep: runs SELECT 1. Correct here — while MySQL is unreachable this
+          # pod should receive no traffic.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          # Shallow: never touches the database. A deep liveness probe would
+          # turn a MySQL blip into an endless app-pod restart loop that cannot
+          # fix anything and removes the application on top of it.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 500m
