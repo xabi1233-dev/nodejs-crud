@@ -148,6 +148,16 @@ app.get('/health', wrap(async (req, res) => {
   res.json({ ok: true, db: 'up' });
 }));
 
+// Liveness, not health. Answers only "is this process still serving?" and
+// deliberately does NOT touch the database.
+//
+// /health runs SELECT 1 and is the right READINESS probe: when MySQL is
+// unreachable the pod should stop receiving traffic. It is the wrong LIVENESS
+// probe, because a MySQL blip would then make Kubernetes kill every app pod,
+// repeatedly, in a restart loop that cannot fix a database problem and removes
+// the application on top of it.
+app.get('/livez', (req, res) => res.json({ ok: true }));
+
 // --- error handling --------------------------------------------------------
 
 app.use((req, res) => res.status(404).render('404'));
